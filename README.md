@@ -29,6 +29,8 @@ It combines the **official app development workflow** (scaffolding web apps, pac
   - [JetBrains / PyCharm / IntelliJ (Copilot)](#2-jetbrains--pycharm--intellij-github-copilot)
   - [Cursor](#3-cursor)
   - [Claude Desktop](#4-claude-desktop)
+  - [Antigravity CLI (agy)](#5-antigravity-cli-agy)
+  - [OpenCode](#6-opencode)
 - [TV Setup (Developer Mode)](#tv-setup-developer-mode)
 - [Tool Reference](#tool-reference)
 - [Example AI Prompts](#example-ai-prompts)
@@ -164,6 +166,35 @@ In `~/.config/Claude/claude_desktop_config.json`:
   }
 }
 ```
+
+### 5. Antigravity CLI (`agy`)
+Add the server using the CLI management command:
+```bash
+agy mcp add tizen-tv tizen-tv-mcp
+```
+To verify that the server is enabled and active:
+```bash
+agy mcp list
+# Output includes:
+# tizen-tv    stdio    enabled    tizen-tv-mcp
+```
+
+### 6. OpenCode
+Add `tizen-tv` to your `~/.config/opencode/opencode.json` configuration file under `"mcp"`:
+```json
+{
+  "mcp": {
+    "tizen-tv": {
+      "type": "local",
+      "command": [
+        "tizen-tv-mcp"
+      ],
+      "enabled": true
+    }
+  }
+}
+```
+*Bonus*: The standalone skill specification is also provided in `~/.config/opencode/skills/tizen-tv/SKILL.md` for agents that read file-based skills.
 
 ---
 
