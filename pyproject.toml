@@ -1,0 +1,19 @@
+[project]
+name = "tizen-tv-mcp"
+version = "0.1.0"
+description = "Unified Samsung Tizen TV MCP Server: Development, Lifecycle Management, and Privacy Debloating"
+readme = "README.md"
+authors = [
+    { name = "Twilight0", email = "twilight0@vivaldi.net" }
+]
+requires-python = ">=3.14"
+dependencies = [
+    "mcp>=1.0.0",
+]
+
+[project.scripts]
+tizen-tv-mcp = "tizen_tv_mcp:main"
+
+[build-system]
+requires = ["uv_build>=0.13.0,<0.14.0"]
+build-backend = "uv_build"
