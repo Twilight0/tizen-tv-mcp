@@ -4,10 +4,12 @@ import json
 import os
 import random
 import re
+import shutil
 import string
+import subprocess
+import urllib.request
 import zipfile
 from typing import Any, Dict, List, Optional
-
 from .sdb import SDBClient, SDBError
 
 
@@ -451,4 +453,129 @@ function navigateFocus(direction) {{
                 f"Open Chromium or Chrome and navigate to http://localhost:{local_port} "
                 "to inspect and debug web views running on the TV."
             ),
+        }
+
+    def get_tv_duid(
+        self,
+        target_serial: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Query the TV's unique device identifier (DUID) for certificate profile registration."""
+        devices = self.sdb.get_devices()
+        serial = target_serial or (devices[0]["serial"] if devices else None)
+        tv_ip = serial.split(":")[0] if serial and ":" in serial else None
+
+        duid = None
+        model_name = "Unknown"
+        if tv_ip:
+            try:
+                req = urllib.request.urlopen(f"http://{tv_ip}:8001/api/v2/", timeout=2)
+                data = json.loads(req.read().decode("utf-8"))
+                dev = data.get("device", {})
+                duid = dev.get("duid", "").replace("uuid:", "")
+                model_name = dev.get("modelName", "Unknown")
+            except Exception:
+                pass
+
+        return {
+            "duid": duid,
+            "model_name": model_name,
+            "target": serial,
+            "notes": (
+                f"DUID for certificate creation: {duid}"
+                if duid else "Could not resolve DUID. Ensure TV is powered on and connected."
+            ),
+        }
+
+    def create_tizen_cert(
+        self,
+        name: str,
+        password: str,
+        output_path: Optional[str] = None,
+        email: Optional[str] = None,
+        country: str = "US",
+        privilege: str = "public",
+    ) -> Dict[str, Any]:
+        """Generate an author certificate using tizen-cli without Tizen Studio."""
+        tizen_bin = shutil.which("tizen-cli") or shutil.which("tizenjs") or "tizen-cli"
+        out_file = output_path or os.path.expanduser(f"~/.tizen-certs/{name}_author.p12")
+        os.makedirs(os.path.dirname(os.path.abspath(out_file)), exist_ok=True)
+
+        cmd = [
+            tizen_bin,
+            "create-tizen-cert",
+            "--name", name,
+            "--password", password,
+            "--output", out_file,
+            "--country", country,
+            "--privilege", privilege,
+        ]
+        if email:
+            cmd.extend(["--email", email])
+
+        res = subprocess.run(cmd, capture_output=True, text=True, check=False)
+        if res.returncode != 0:
+            raise SDBError(f"Failed to create Tizen certificate: {res.stderr.strip() or res.stdout.strip()}")
+
+        return {
+            "author_p12": out_file,
+            "password": password,
+            "status": "created",
+            "output": res.stdout.strip(),
+        }
+
+    def sign_and_package_wgt(
+        self,
+        target_path: str,
+        output_path: Optional[str] = None,
+        author_p12: Optional[str] = None,
+        author_pwd: Optional[str] = None,
+        distributor_p12: Optional[str] = None,
+        distributor_pwd: Optional[str] = None,
+        privilege: str = "public",
+    ) -> Dict[str, Any]:
+        """Package and sign a project directory or re-sign an existing .wgt package using tizen-cli.
+
+        Args:
+            target_path: Path to directory containing config.xml or path to an existing .wgt/.tpk file.
+            output_path: Path for output .wgt package.
+            author_p12: Path to author .p12 certificate.
+            author_pwd: Password for author certificate.
+            distributor_p12: Path to distributor .p12 certificate.
+            distributor_pwd: Password for distributor certificate.
+            privilege: Privilege level ('public' or 'partner').
+        """
+        tizen_bin = shutil.which("tizen-cli") or shutil.which("tizenjs") or "tizen-cli"
+        full_target = os.path.abspath(os.path.expanduser(target_path))
+        if not os.path.exists(full_target):
+            raise SDBError(f"Target path does not exist: {full_target}")
+
+        is_pkg = full_target.endswith(".wgt") or full_target.endswith(".tpk")
+        out_file = output_path or (
+            full_target.replace(".wgt", "_signed.wgt") if is_pkg else f"/tmp/{os.path.basename(full_target)}.wgt"
+        )
+
+        cmd = [tizen_bin, "build", "." if not is_pkg else full_target, "--type", "wgt", "-o", out_file]
+        if author_p12:
+            cmd.extend(["--author", os.path.abspath(os.path.expanduser(author_p12))])
+        if author_pwd:
+            cmd.extend(["--authorPwd", author_pwd])
+        if distributor_p12:
+            cmd.extend(["--distributor", os.path.abspath(os.path.expanduser(distributor_p12))])
+        if distributor_pwd:
+            cmd.extend(["--distributorPwd", distributor_pwd])
+        if not distributor_p12:
+            cmd.extend(["--privilege", privilege])
+
+        cwd = full_target if not is_pkg else os.path.dirname(full_target)
+        res = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, check=False)
+        if res.returncode != 0:
+            raise SDBError(f"tizen-cli build failed: {res.stderr.strip() or res.stdout.strip()}")
+
+        size = os.path.getsize(out_file) if os.path.exists(out_file) else 0
+        return {
+            "package_path": out_file,
+            "size_bytes": size,
+            "size_kb": round(size / 1024, 2),
+            "status": "signed_and_packaged",
+            "output": res.stdout.strip(),
         }

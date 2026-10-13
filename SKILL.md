@@ -295,12 +295,18 @@ document.addEventListener('keydown', function(e) {
 });
 ```
 
-### 3. Packaging into `.wgt` (Zero SDK Tools Required):
-A `.wgt` package is simply a standard zip archive:
+### 3. Packaging & Signing with `tizen-cli` (Zero Studio):
+Use `tizen-cli` to package and generate official XML signatures (`author-signature.xml`, `signature1.xml`):
 ```bash
-# Package the web app directory into a .wgt
+# Generate Author certificate (.p12)
+tizen-cli create-tizen-cert --name "MyName" --password "secret123" --output ~/.tizen-certs/author.p12
+
+# Package and sign a Web App directory
 cd /path/to/my-tv-app
-zip -r /tmp/my-tv-app.wgt config.xml index.html icon.png css js
+tizen-cli build . --type wgt --author ~/.tizen-certs/author.p12 --authorPwd "secret123" --privilege public --output /tmp/my-tv-app.wgt
+
+# Or re-sign an existing third-party .wgt (e.g. Vetro or community apps)
+tizen-cli build /path/to/app.wgt --type wgt --author ~/.tizen-certs/author.p12 --authorPwd "secret123" --privilege public --output /tmp/resigned.wgt
 
 # Install directly to the connected TV
 sdb install /tmp/my-tv-app.wgt

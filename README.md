@@ -47,6 +47,9 @@ It combines the **official app development workflow** (scaffolding web apps, pac
 * **`scaffold_tv_webapp`**: Generates a complete Tizen Web App project structure (`config.xml`, `index.html`, 1080p TV CSS with focus states, remote D-pad navigation, and app icons).
 * **`build_and_package_wgt`**: Validates manifest and bundles web assets into a standard `.wgt` archive.
 * **`install_app`**: Pushes and installs `.wgt` or `.tpk` packages to the TV over SDB.
+* **`get_tv_duid`**: Queries the TV's unique device identifier (DUID) directly from the connected TV for certificate creation.
+* **`create_tizen_cert`**: Generates an author certificate (`.p12`) via `tizen-cli` with zero external dependencies.
+* **`sign_and_package_wgt`**: Builds and signs Tizen web app directories OR re-signs existing `.wgt` packages (like Vetro or community apps) using `tizen-cli`.
 * **`remote_key_press`**: Injects TV remote control keycodes (`UP`, `DOWN`, `LEFT`, `RIGHT`, `ENTER`, `RETURN`, `PLAY`, `PAUSE`, `VOL_UP`, `VOL_DOWN`, `MUTE`).
 * **`start_web_inspector`**: Forwards Chromium DevTools port (`9222`) for debugging web apps directly on the TV screen.
 
@@ -261,6 +264,9 @@ To allow SDB connections on your Samsung TV:
 | `start_web_inspector`| `remote_port` *(int)*, `local_port` *(int)* | Forwards Chromium DevTools port for live web view debugging. |
 | `forward_port` | `local_port` *(int)*, `remote_port` *(int)* | Forwards host port to TV port. |
 | `reverse_port` | `remote_port` *(int)*, `local_port` *(int)* | Forwards TV port to host port. |
+| `get_tv_duid` | `target_serial` *(str)* | Queries TV DUID and model info for certificate registration. |
+| `create_tizen_cert` | `name` *(str)*, `password` *(str)*, `output_path` *(str)* | Creates author certificate (.p12) via tizen-cli without Tizen Studio. |
+| `sign_and_package_wgt` | `target_path` *(str)*, `output_path` *(str)*, `author_p12` *(str)*, `author_pwd` *(str)* | Builds & signs web app directory OR re-signs existing .wgt package via tizen-cli. |
 | `run_shell_command` | `command` *(str)*, `timeout_seconds` *(int)* | Runs validated shell command on TV. |
 
 ---

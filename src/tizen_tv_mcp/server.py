@@ -121,6 +121,79 @@ def start_web_inspector(
     )
 
 
+@mcp.tool()
+def get_tv_duid(
+    target_serial: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Query the TV's unique device identifier (DUID) needed for Samsung certificate registration.
+
+    Args:
+        target_serial: Target device serial (optional).
+    """
+    return dev_mgr.get_tv_duid(target_serial=target_serial)
+
+
+@mcp.tool()
+def create_tizen_cert(
+    name: str,
+    password: str,
+    output_path: Optional[str] = None,
+    email: Optional[str] = None,
+    country: str = "US",
+    privilege: str = "public",
+) -> Dict[str, Any]:
+    """Generate an author certificate (.p12) via tizen-cli without Tizen Studio.
+
+    Args:
+        name: Name of the developer/author.
+        password: Password to protect the author certificate.
+        output_path: Path for output .p12 file (defaults to ~/.tizen-certs/<name>_author.p12).
+        email: Developer email (optional).
+        country: 2-letter country code (default 'US').
+        privilege: Certificate privilege level ('public' or 'partner').
+    """
+    return dev_mgr.create_tizen_cert(
+        name=name,
+        password=password,
+        output_path=output_path,
+        email=email,
+        country=country,
+        privilege=privilege,
+    )
+
+
+@mcp.tool()
+def sign_and_package_wgt(
+    target_path: str,
+    output_path: Optional[str] = None,
+    author_p12: Optional[str] = None,
+    author_pwd: Optional[str] = None,
+    distributor_p12: Optional[str] = None,
+    distributor_pwd: Optional[str] = None,
+    privilege: str = "public",
+) -> Dict[str, Any]:
+    """Build and sign a Tizen web app directory OR re-sign an existing .wgt package via tizen-cli.
+
+    Args:
+        target_path: Path to web app directory containing config.xml, OR path to an existing .wgt file to re-sign.
+        output_path: Path for the signed .wgt package.
+        author_p12: Path to author .p12 certificate.
+        author_pwd: Password for author certificate.
+        distributor_p12: Path to distributor .p12 certificate (optional).
+        distributor_pwd: Password for distributor certificate.
+        privilege: 'public' or 'partner' (used if distributor certificate is omitted).
+    """
+    return dev_mgr.sign_and_package_wgt(
+        target_path=target_path,
+        output_path=output_path,
+        author_p12=author_p12,
+        author_pwd=author_pwd,
+        distributor_p12=distributor_p12,
+        distributor_pwd=distributor_pwd,
+        privilege=privilege,
+    )
+
+
 # ============================================================================
 # Operations & Telemetry Tools (Custom Approach)
 # ============================================================================
