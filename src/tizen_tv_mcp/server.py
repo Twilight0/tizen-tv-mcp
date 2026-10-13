@@ -162,6 +162,20 @@ def create_tizen_cert(
     )
 
 
+
+@mcp.tool()
+def permit_device(
+    cert_dir: Optional[str] = None,
+    target_serial: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Push device-profile.xml to the TV to authorize installing applications for your certificate profile.
+
+    Args:
+        cert_dir: Optional directory containing device-profile.xml (defaults to ~/.tizen-certs/samsung-partner).
+        target_serial: Target device serial (optional).
+    """
+    return dev_mgr.permit_device(cert_dir=cert_dir, target_serial=target_serial)
+
 @mcp.tool()
 def sign_and_package_wgt(
     target_path: str,

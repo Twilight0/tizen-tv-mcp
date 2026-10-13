@@ -3,6 +3,10 @@
 import os
 import re
 import shutil
+import socket
+import subprocess
+import re
+import shutil
 import subprocess
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -60,6 +64,50 @@ class SDBClient:
         """Execute a remote shell command on the target Tizen device."""
         self._validate_shell_safety(command)
         return self.run(["shell", command], target_serial=target_serial, timeout=timeout)
+
+    def exec_stream(
+        self,
+        command: str,
+        target_serial: Optional[str] = None,
+        port: int = 26099,
+        timeout: int = 60,
+    ) -> str:
+        """Execute a raw service command over SDB transport stream (e.g. shell:0 vd_appinstall)."""
+        serial = target_serial
+        if not serial:
+            devs = self.get_devices()
+            if not devs:
+                raise SDBError("No devices connected to SDB.")
+            serial = devs[0]["serial"]
+
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.settimeout(timeout)
+        try:
+            s.connect(("127.0.0.1", port))
+            trans_req = f"host:transport:{serial}"
+            s.sendall(f"{len(trans_req):04x}{trans_req}".encode())
+            resp = s.recv(4)
+            if resp != b"OKAY":
+                raise SDBError(f"SDB transport failed: {resp.decode('utf-8', errors='replace')}")
+
+            s.sendall(f"{len(command):04x}{command}".encode())
+            resp2 = s.recv(4)
+            if resp2 != b"OKAY":
+                raise SDBError(f"SDB command rejected: {resp2.decode('utf-8', errors='replace')}")
+
+            out = b""
+            while True:
+                chunk = s.recv(4096)
+                if not chunk:
+                    break
+                out += chunk
+            return out.decode("utf-8", errors="replace")
+        except socket.timeout:
+            raise SDBError(f"SDB stream timed out after {timeout}s: {command}")
+        except Exception as e:
+            raise SDBError(f"SDB stream error: {e}")
+        finally:
+            s.close()
 
     def _validate_shell_safety(self, command: str) -> None:
         """Guard against catastrophic or bricking commands."""

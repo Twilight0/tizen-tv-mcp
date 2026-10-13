@@ -395,21 +395,55 @@ function navigateFocus(direction) {{
 
     def install_app(
         self,
-        wgt_path: str,
+        package_path: str,
+        package_id: Optional[str] = None,
         target_serial: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """Install a .wgt or .tpk package on the connected TV."""
-        p = os.path.abspath(os.path.expanduser(wgt_path))
+        """Install a .wgt (Web Widget) or .tpk (Native) package onto the Samsung TV."""
+        p = os.path.abspath(os.path.expanduser(package_path))
         if not os.path.exists(p):
             raise SDBError(f"Package file not found: {p}")
 
-        out = self.sdb.run(["install", p], target_serial=target_serial, timeout=60)
-        return {
-            "package_path": p,
-            "output": out,
-            "success": "100%" in out or "success" in out.lower(),
-        }
+        filename = os.path.basename(p)
+        is_wgt = p.endswith(".wgt")
 
+        if is_wgt:
+            # Extract package ID from config.xml if not specified
+            pkg_id = package_id
+            if not pkg_id:
+                try:
+                    with zipfile.ZipFile(p, "r") as zf:
+                        cfg_content = zf.read("config.xml").decode("utf-8", errors="replace")
+                        match = re.search(r'package="([^"]+)"', cfg_content)
+                        if match:
+                            pkg_id = match.group(1)
+                except Exception:
+                    pass
+            if not pkg_id:
+                pkg_id = os.path.splitext(filename)[0]
+
+            # Push to TV sdk_tools directory and execute vd_appinstall
+            remote_path = f"/home/owner/share/tmp/sdk_tools/{filename}"
+            self.sdb.run(["push", p, remote_path], target_serial=target_serial)
+            cmd = f"shell:0 vd_appinstall {pkg_id} {remote_path}"
+            out = self.sdb.exec_stream(cmd, target_serial=target_serial)
+            success = "was_install_app return WAS_TRUE" in out and "reason: Success" in out
+
+            return {
+                "package_path": p,
+                "package_id": pkg_id,
+                "mode": "vd_appinstall (Web .wgt)",
+                "output": out,
+                "success": success,
+            }
+        else:
+            out = self.sdb.run(["install", p], target_serial=target_serial, timeout=60)
+            return {
+                "package_path": p,
+                "mode": "appinstall (Native .tpk)",
+                "output": out,
+                "success": "100%" in out or "success" in out.lower(),
+            }
     def remote_key_press(
         self,
         key: str,
@@ -554,6 +588,27 @@ function navigateFocus(direction) {{
             full_target.replace(".wgt", "_signed.wgt") if is_pkg else f"/tmp/{os.path.basename(full_target)}.wgt"
         )
 
+        # Auto-detect Samsung Partner / Public certificates if omitted
+        if not author_p12:
+            partner_auth = os.path.expanduser("~/.tizen-certs/samsung-partner/author.p12")
+            public_auth = os.path.expanduser("~/.tizen-certs/samsung/author.p12")
+            if os.path.exists(partner_auth):
+                author_p12 = partner_auth
+                author_pwd = author_pwd or "password123"
+            elif os.path.exists(public_auth):
+                author_p12 = public_auth
+                author_pwd = author_pwd or "password123"
+
+        if not distributor_p12:
+            partner_dist = os.path.expanduser("~/.tizen-certs/samsung-partner/distributor.p12")
+            public_dist = os.path.expanduser("~/.tizen-certs/samsung/distributor.p12")
+            if os.path.exists(partner_dist):
+                distributor_p12 = partner_dist
+                distributor_pwd = distributor_pwd or "password123"
+            elif os.path.exists(public_dist):
+                distributor_p12 = public_dist
+                distributor_pwd = distributor_pwd or "password123"
+
         cmd = [tizen_bin, "build", "." if not is_pkg else full_target, "--type", "wgt", "-o", out_file]
         if author_p12:
             cmd.extend(["--author", os.path.abspath(os.path.expanduser(author_p12))])
@@ -578,4 +633,32 @@ function navigateFocus(direction) {{
             "size_kb": round(size / 1024, 2),
             "status": "signed_and_packaged",
             "output": res.stdout.strip(),
+        }
+
+    def permit_device(
+        self,
+        cert_dir: Optional[str] = None,
+        target_serial: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Push device-profile.xml to the TV to authorize installing developer applications."""
+        search_dirs = [
+            cert_dir,
+            os.path.expanduser("~/.tizen-certs/samsung-partner"),
+            os.path.expanduser("~/.tizen-certs/samsung"),
+            os.path.expanduser("~/.tizen-certs"),
+        ]
+        profile_xml = None
+        for d in search_dirs:
+            if d and os.path.exists(os.path.join(d, "device-profile.xml")):
+                profile_xml = os.path.join(d, "device-profile.xml")
+                break
+        if not profile_xml:
+            raise SDBError("device-profile.xml not found. Generate Samsung certificates first.")
+
+        out = self.sdb.run(["push", profile_xml, "/home/owner/share/tmp/sdk_tools/device-profile.xml"], target_serial=target_serial)
+        return {
+            "device_profile": profile_xml,
+            "target": target_serial,
+            "status": "permitted",
+            "output": out,
         }
