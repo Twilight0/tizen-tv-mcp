@@ -1,6 +1,8 @@
 """Tizen TV operations: system telemetry, app management, safe privacy debloating, logging."""
 
+import json
 import re
+import urllib.request
 from typing import Any, Dict, List, Optional
 
 from .sdb import SDBClient, SDBError
@@ -119,58 +121,84 @@ class TizenOpsManager:
         """Fetch TV hardware, memory, storage, and platform telemetry."""
         info: Dict[str, Any] = {}
 
-        # 1. TV Model & OS
+        # 0. Query SDB capabilities directly (available even when intershell is restricted)
         try:
-            model = self.sdb.shell("vconftool -g db/system/model_name", target_serial=target_serial)
-            info["model_name"] = model.strip() if "error" not in model.lower() else "Unknown"
+            cap = self.sdb.run(["capability"], target_serial=target_serial)
+            for line in cap.splitlines():
+                if ":" in line:
+                    k, v = line.split(":", 1)
+                    k, v = k.strip(), v.strip()
+                    if k in ("platform_version", "cpu_arch", "profile_name", "sdbd_version", "vendor_name"):
+                        info[k] = v
         except Exception:
-            info["model_name"] = "Unknown"
+            pass
 
+        # 1. Query TV REST API endpoint (port 8001) for rich TV model, 4K resolution, OS, WiFi MAC
+        devices = self.sdb.get_devices()
+        serial = target_serial or (devices[0]["serial"] if devices else None)
+        tv_ip = serial.split(":")[0] if serial and ":" in serial else None
+        if tv_ip:
+            try:
+                req = urllib.request.urlopen(f"http://{tv_ip}:8001/api/v2/", timeout=2)
+                data = json.loads(req.read().decode("utf-8"))
+                dev = data.get("device", {})
+                info["model_name"] = dev.get("modelName", info.get("model_name", "Unknown"))
+                info["resolution"] = dev.get("resolution")
+                info["language"] = dev.get("Language")
+                info["power_state"] = dev.get("PowerState")
+                info["network_type"] = dev.get("networkType")
+                info["wifi_mac"] = dev.get("wifiMac")
+                info["developer_mode"] = dev.get("developerMode")
+                info["developer_ip"] = dev.get("developerIP")
+                info["device_name"] = dev.get("name")
+            except Exception:
+                pass
+
+        # 2. TV Model fallback via shell
+        if "model_name" not in info:
+            try:
+                model = self.sdb.shell("vconftool -g db/system/model_name", target_serial=target_serial)
+                info["model_name"] = model.strip() if "error" not in model.lower() else "Unknown"
+            except Exception:
+                info["model_name"] = "Unknown"
+
+        # 3. Kernel via shell
         try:
             uname = self.sdb.shell("uname -a", target_serial=target_serial)
-            info["kernel"] = uname.strip()
+            if uname and "closed" not in uname.lower():
+                info["kernel"] = uname.strip()
         except Exception:
             pass
 
-        # 2. CPU info
-        try:
-            cpuinfo = self.sdb.shell("cat /proc/cpuinfo", target_serial=target_serial)
-            cores = len(re.findall(r"^processor\s*:", cpuinfo, re.M))
-            hardware = re.search(r"Hardware\s*:\s*(.*)", cpuinfo)
-            info["cpu"] = {
-                "cores": cores,
-                "hardware": hardware.group(1).strip() if hardware else "ARM/Tizen",
-            }
-        except Exception:
-            pass
-
-        # 3. Memory & Swap
+        # 4. Memory & Swap via shell
         try:
             meminfo = self.sdb.shell("cat /proc/meminfo", target_serial=target_serial)
-            mem_total = re.search(r"MemTotal:\s*(\d+)\s*kB", meminfo)
-            mem_free = re.search(r"MemFree:\s*(\d+)\s*kB", meminfo)
-            mem_avail = re.search(r"MemAvailable:\s*(\d+)\s*kB", meminfo)
-            swap_total = re.search(r"SwapTotal:\s*(\d+)\s*kB", meminfo)
-            swap_free = re.search(r"SwapFree:\s*(\d+)\s*kB", meminfo)
+            if meminfo and "closed" not in meminfo.lower():
+                mem_total = re.search(r"MemTotal:\s*(\d+)\s*kB", meminfo)
+                mem_free = re.search(r"MemFree:\s*(\d+)\s*kB", meminfo)
+                mem_avail = re.search(r"MemAvailable:\s*(\d+)\s*kB", meminfo)
+                swap_total = re.search(r"SwapTotal:\s*(\d+)\s*kB", meminfo)
+                swap_free = re.search(r"SwapFree:\s*(\d+)\s*kB", meminfo)
 
-            total_kb = int(mem_total.group(1)) if mem_total else 0
-            free_kb = int(mem_free.group(1)) if mem_free else 0
-            avail_kb = int(mem_avail.group(1)) if mem_avail else free_kb
+                total_kb = int(mem_total.group(1)) if mem_total else 0
+                free_kb = int(mem_free.group(1)) if mem_free else 0
+                avail_kb = int(mem_avail.group(1)) if mem_avail else free_kb
 
-            info["memory"] = {
-                "total_mb": round(total_kb / 1024, 1),
-                "available_mb": round(avail_kb / 1024, 1),
-                "used_mb": round((total_kb - avail_kb) / 1024, 1),
-                "swap_total_mb": round(int(swap_total.group(1)) / 1024, 1) if swap_total else 0,
-                "swap_free_mb": round(int(swap_free.group(1)) / 1024, 1) if swap_free else 0,
-            }
+                info["memory"] = {
+                    "total_mb": round(total_kb / 1024, 1),
+                    "available_mb": round(avail_kb / 1024, 1),
+                    "used_mb": round((total_kb - avail_kb) / 1024, 1),
+                    "swap_total_mb": round(int(swap_total.group(1)) / 1024, 1) if swap_total else 0,
+                    "swap_free_mb": round(int(swap_free.group(1)) / 1024, 1) if swap_free else 0,
+                }
         except Exception:
             pass
 
-        # 4. Storage partitions
+        # 5. Storage partitions via shell
         try:
             df = self.sdb.shell("df -h", target_serial=target_serial)
-            info["storage_df"] = df.strip()
+            if df and "closed" not in df.lower():
+                info["storage_df"] = df.strip()
         except Exception:
             pass
 

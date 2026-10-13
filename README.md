@@ -30,7 +30,8 @@ It combines the **official app development workflow** (scaffolding web apps, pac
   - [Cursor](#3-cursor)
   - [Claude Desktop](#4-claude-desktop)
   - [Antigravity CLI (agy)](#5-antigravity-cli-agy)
-  - [OpenCode](#6-opencode)
+-  - [OpenCode](#6-opencode)
+-  - [OMP](#7-omp)
 - [TV Setup (Developer Mode)](#tv-setup-developer-mode)
 - [Tool Reference](#tool-reference)
 - [Example AI Prompts](#example-ai-prompts)
@@ -195,6 +196,26 @@ Add `tizen-tv` to your `~/.config/opencode/opencode.json` configuration file und
 }
 ```
 *Bonus*: The standalone skill specification is also provided in `~/.config/opencode/skills/tizen-tv/SKILL.md` for agents that read file-based skills.
+
+### 7. OMP
+Add `tizen-tv` to your user MCP configuration at `~/.omp/agent/mcp.json` (or `.omp/mcp.json` in a project root):
+```json
+{
+  "$schema": "https://raw.githubusercontent.com/can1357/oh-my-pi/main/packages/coding-agent/src/config/mcp-schema.json",
+  "mcpServers": {
+    "tizen-tv": {
+      "type": "stdio",
+      "command": "tizen-tv-mcp"
+    }
+  }
+}
+```
+Inside an OMP session, discover and test with:
+```text
+/mcp reload
+/mcp list
+/mcp test tizen-tv
+```
 
 ---
 
