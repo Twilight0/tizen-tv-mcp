@@ -40,31 +40,41 @@ class TizenOpsManager:
         include_system: bool = True,
         target_serial: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
-        """List installed applications on the TV."""
-        raw = self.sdb.shell("app_launcher -l", target_serial=target_serial)
+        """List installed applications on the TV.
+
+        Uses raw `vd_applist` (allowlisted on retail sdbd); the classic
+        `app_launcher -l` goes through generic shell and is refused
+        (intershell_support:disabled). Verified on UE49RU7372.
+        """
+        raw = self.sdb.exec_stream("shell:0 vd_applist", target_serial=target_serial)
         apps: List[Dict[str, Any]] = []
 
-        for line in raw.splitlines():
-            line = line.strip()
-            if not line:
-                continue
-            # Typical app_launcher -l output formats:
-            # - '9Ur5IzDKqV.TizenYouTube'
-            # - 'org.tizen.browser'
-            # or with status/details
-            parts = re.split(r"\s+", line)
-            app_id = parts[0]
-            pkg_id = app_id.split(".")[0] if "." in app_id else app_id
-            is_system = app_id.startswith("org.tizen") or app_id.startswith("com.samsung.tv")
+        # vd_applist emits sequential records; fields are dash-padded, e.g.
+        #   --------------app_id    =9Ur5IzDKqV.TizenYouTube-------------
+        #   --------------app_title =YouTube-------------
+        # Parse positionally: each app_id starts a record spanning the text
+        # up to the next app_id.
+        id_marks = [m for m in re.finditer(r"app_id\s*=\s*([^\s\n-]+)", raw)]
+        for n, m in enumerate(id_marks):
+            app_id = m.group(1).strip()
+            record = raw[m.end():id_marks[n + 1].start() if n + 1 < len(id_marks) else len(raw)]
 
+            def field(name: str) -> Optional[str]:
+                fm = re.search(name + r"\s*=\s*([^\n]+)", record)
+                if not fm:
+                    return None
+                return fm.group(1).strip().strip("-").strip() or None
+
+            title = field("app_title") or app_id
+            pkg_id = field("app_package") or (app_id.split(".")[0] if "." in app_id else app_id)
+            is_system = app_id.startswith("org.tizen") or app_id.startswith("com.samsung.tv")
             if not include_system and is_system:
                 continue
-
             apps.append({
                 "app_id": app_id,
+                "title": title,
                 "package_id": pkg_id,
                 "is_system": is_system,
-                "raw_info": line,
             })
         return apps
 
