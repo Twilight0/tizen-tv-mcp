@@ -6,7 +6,7 @@ readme = "README.md"
 authors = [
     { name = "Twilight0", email = "twilight0@vivaldi.net" }
 ]
-requires-python = ">=3.14"
+requires-python = ">=3.10"
 dependencies = [
     "mcp>=1.0.0",
 ]
