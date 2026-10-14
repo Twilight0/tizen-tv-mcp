@@ -395,12 +395,16 @@ function navigateFocus(direction) {{
 
     def install_app(
         self,
-        package_path: str,
+        package_path: Optional[str] = None,
         package_id: Optional[str] = None,
         target_serial: Optional[str] = None,
+        wgt_path: Optional[str] = None,  # alias used by the MCP tool layer
     ) -> Dict[str, Any]:
         """Install a .wgt (Web Widget) or .tpk (Native) package onto the Samsung TV."""
-        p = os.path.abspath(os.path.expanduser(package_path))
+        raw_path = wgt_path or package_path
+        if not raw_path:
+            raise SDBError("No package path provided (package_path/wgt_path).")
+        p = os.path.abspath(os.path.expanduser(raw_path))
         if not os.path.exists(p):
             raise SDBError(f"Package file not found: {p}")
 

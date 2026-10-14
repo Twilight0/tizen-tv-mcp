@@ -73,8 +73,13 @@ class TizenOpsManager:
         app_id: str,
         target_serial: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """Launch an application by its application ID."""
-        out = self.sdb.shell(f"app_launcher -s {app_id}", target_serial=target_serial)
+        """Launch an application by its application ID.
+
+        Uses the raw `:0` exec form (`shell:0 execute <id>`): generic
+        `sdb shell` is refused by retail sdbd (intershell_support:disabled)
+        but this allowlisted command is honored. Verified on UE49RU7372.
+        """
+        out = self.sdb.exec_stream(f"shell:0 execute {app_id}", target_serial=target_serial)
         return {
             "app_id": app_id,
             "output": out or "Launched successfully",
