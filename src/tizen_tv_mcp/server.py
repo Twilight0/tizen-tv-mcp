@@ -163,8 +163,81 @@ def create_tizen_cert(
 
 
 
+
+@mcp.tool()
+def create_samsung_cert(
+    name: str,
+    password: str,
+    email: str,
+    duid_list: str,
+    privilege: str = "Partner",
+    output_dir: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Create a Samsung certificate using tizenjs CLI.
+    
+    This requires interactive Samsung account sign-in via the Samsung developer portal.
+    The user must visit the provided URL, sign in, and paste the JSON response.
+    
+    Args:
+        name: Certificate name (e.g., 'TizenHomebrew').
+        password: Password to protect the certificate.
+        email: Samsung account email.
+        duid_list: TVs DUID (from get_tv_duid).
+        privilege: 'Partner' or 'Public'.
+        output_dir: Directory for generated certificates.
+    """
+    return dev_mgr.create_samsung_cert(
+        name=name,
+        password=password,
+        email=email,
+        duid_list=duid_list,
+        privilege=privilege,
+        output_dir=output_dir,
+    )
+
+
+@mcp.tool()
+def bootstrap_homebrew(
+    target_serial: Optional[str] = None,
+    tv_ip: Optional[str] = None,
+    name: str = "TizenHomebrew",
+    password: str = "password123",
+    email: str = "",
+    privilege: str = "Partner",
+    output_dir: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Full bootstrap: create Samsung cert for TV, install tizen-homebrew, set up for local installs.
+    
+    This replicates the tizen-homebrew installer flow:
+    1. Get TV DUID
+    2. Create Samsung certificate for TVs DUID (requires Samsung account sign-in)
+    3. Push device-profile.xml to TV
+    4. Install tizen-homebrew.wgt on TV
+    5. Instruct user to set Developer Mode IP to 127.0.0.1
+    
+    Args:
+        target_serial: TV serial (optional, auto-detected).
+        tv_ip: TV IP address (optional, auto-detected).
+        name: Certificate name.
+        password: Certificate password.
+        email: Samsung account email.
+        privilege: 'Partner' or 'Public'.
+        output_dir: Directory for generated certificates.
+    """
+    return dev_mgr.bootstrap_homebrew(
+        target_serial=target_serial,
+        tv_ip=tv_ip,
+        name=name,
+        password=password,
+        email=email,
+        privilege=privilege,
+        output_dir=output_dir,
+    )
+
+
 @mcp.tool()
 def permit_device(
+
     cert_dir: Optional[str] = None,
     target_serial: Optional[str] = None,
 ) -> Dict[str, Any]:

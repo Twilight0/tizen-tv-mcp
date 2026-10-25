@@ -561,6 +561,213 @@ function navigateFocus(direction) {{
             "output": res.stdout.strip(),
         }
 
+    def create_samsung_cert(
+        self,
+        name: str,
+        password: str,
+        email: str,
+        duid_list: str,
+        privilege: str = "Partner",
+        output_dir: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Create a Samsung certificate using tizenjs CLI.
+        
+        This requires interactive Samsung account sign-in via the Samsung developer portal.
+        The user must visit the provided URL, sign in, and paste the JSON response.
+        """
+        tizen_bin = shutil.which("tizenjs") or shutil.which("tizenjs") or os.environ.get("TIZEN_CLI") or os.path.expanduser("~/.local/bin/tizenjs") or "tizenjs"
+        out_dir = output_dir or os.path.expanduser(f"~/.tizen-certs/samsung-{name.lower().replace(' ', '-')}")
+        os.makedirs(out_dir, exist_ok=True)
+
+        cmd = [
+            tizen_bin,
+            "create-samsung-cert",
+            "--name", name,
+            "--password", password,
+            "--email", email,
+            "--duidList", duid_list,
+            "--privilege", privilege,
+            "--output", out_dir,
+        ]
+
+        # The command will prompt for the JSON response from Samsung's sign-in page
+        # We need to handle this interactively
+        print(f"\n{'='*60}")
+        print(f"SAMSUNG CERTIFICATE CREATION REQUIRES INTERACTIVE SIGN-IN")
+        print(f"{'='*60}")
+        print(f"1. Open this URL in your browser:")
+        print(f"   https://account.samsung.com/accounts/TDC/signInGate?clientId=v285zxnl3h&tokenType=TOKEN")
+        print(f"2. Sign in with your Samsung developer account")
+        print(f"3. Copy the JSON response from the page")
+        print(f"4. Paste it here when prompted")
+        print(f"{'='*60}\n")
+        
+        # We need to handle the interactive input
+        # The tizenjs CLI expects the JSON on stdin
+        import sys
+        print("Paste the JSON response here (then press Enter, then Ctrl+D):")
+        json_input = sys.stdin.read()
+        
+        if not json_input.strip():
+            raise SDBError("No JSON response provided. Certificate creation cancelled.")
+        
+        # Write JSON to a temp file and pass via stdin
+        import tempfile
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
+            f.write(json_input.strip())
+            json_file = f.name
+        
+        try:
+            cmd = [
+                tizen_bin,
+                "create-samsung-cert",
+                "--name", name,
+                "--password", password,
+                "--email", email,
+                "--duidList", duid_list,
+                "--privilege", privilege,
+                "--output", out_dir,
+            ]
+            
+            # Run with JSON input on stdin
+            res = subprocess.run(cmd, input=json_input, capture_output=True, text=True, check=False)
+            
+            if res.returncode != 0:
+                raise SDBError(f"Failed to create Samsung certificate: {res.stderr.strip() or res.stdout.strip()}")
+            
+            # Find the generated files
+            author_p12 = os.path.join(out_dir, "author.p12")
+            distributor_p12 = os.path.join(out_dir, "distributor.p12")
+            device_profile = os.path.join(out_dir, "device-profile.xml")
+            
+            return {
+                "author_p12": author_p12 if os.path.exists(author_p12) else None,
+                "distributor_p12": distributor_p12 if os.path.exists(distributor_p12) else None,
+                "device_profile": device_profile if os.path.exists(device_profile) else None,
+                "status": "created",
+                "output": res.stdout.strip(),
+            }
+        finally:
+            if 'json_file' in locals() and os.path.exists(json_file):
+                os.unlink(json_file)
+
+    def bootstrap_homebrew(
+        self,
+        target_serial: Optional[str] = None,
+        tv_ip: Optional[str] = None,
+        name: str = "TizenHomebrew",
+        password: str = "password123",
+        email: str = "",
+        privilege: str = "Partner",
+        output_dir: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Full bootstrap: create Samsung cert for TV, install tizen-homebrew, set up for local installs.
+        
+        This replicates the tizen-homebrew installer flow:
+        1. Get TV DUID
+        2. Create Samsung certificate for TV's DUID (requires Samsung account sign-in)
+        3. Push device-profile.xml to TV
+        4. Install tizen-homebrew.wgt on TV
+        5. Instruct user to set Developer Mode IP to 127.0.0.1
+        
+        Args:
+            target_serial: TV serial (optional, auto-detected)
+            tv_ip: TV IP address (optional, auto-detected)
+            name: Certificate name
+            password: Certificate password
+            email: Samsung account email
+            privilege: 'Partner' or 'Public'
+            output_dir: Directory for generated certificates
+        """
+        results = {}
+        
+        # 1. Connect and get TV info
+        if not target_serial:
+            devices = self.sdb.get_devices()
+            tv_devices = [d for d in devices if d.get("status") == "device"]
+            if not tv_devices:
+                raise SDBError("No TV device connected. Use connect_tv first.")
+            target_serial = tv_devices[0]["serial"]
+        
+        results["tv_serial"] = target_serial
+        
+        # 2. Get TV DUID
+        duid_result = self.get_tv_duid(target_serial=target_serial)
+        duid = duid_result.get("duid")
+        if not duid:
+            raise SDBError("Could not get TV DUID")
+        results["duid"] = duid
+        
+        # 3. Create Samsung certificate for this TV's DUID
+        cert_result = self.create_samsung_cert(
+            name=name,
+            password=password,
+            email=email,
+            duid_list=duid,
+            privilege=privilege,
+            output_dir=output_dir,
+        )
+        results["certificate"] = cert_result
+        
+        # Push device-profile.xml to TV
+        device_profile = cert_result.get("device_profile")
+        if device_profile and os.path.exists(device_profile):
+            permit_result = self.permit_device(cert_dir=os.path.dirname(device_profile), target_serial=target_serial)
+            results["permit_device"] = permit_result
+        
+        # Build tizen-homebrew from source
+        homebrew_dir = os.path.expanduser("~/Projects/tizen-homebrew")
+        if not os.path.exists(homebrew_dir):
+            # Clone from GitHub
+            import subprocess
+            subprocess.run(["git", "clone", "https://github.com/SushyDev/tizen-homebrew.git", 
+                          os.path.expanduser("~/Projects/tizen-homebrew")], check=True)
+            homebrew_dir = os.path.expanduser("~/Projects/tizen-homebrew")
+        
+        # Build the wgt
+        subprocess.run(["npm", "install"], cwd=homebrew_dir, check=True)
+        subprocess.run(["npm", "run", "build"], cwd=homebrew_dir, check=True)
+        subprocess.run(["npm", "run", "build:wgt"], cwd=homebrew_dir, check=True)
+        
+        # Find the built wgt
+        import glob
+        wgt_files = glob.glob(os.path.join(homebrew_dir, "*.wgt"))
+        if not wgt_files:
+            raise SDBError("No .wgt file found after build")
+        wgt_path = wgt_files[0]
+        
+        # Sign with the new certificate
+        cert_dir = os.path.dirname(cert_result.get("author_p12", ""))
+        author_p12 = os.path.join(cert_dir, "author.p12")
+        distributor_p12 = os.path.join(cert_dir, "distributor.p12")
+        
+        sign_result = self.sign_and_package_wgt(
+            target_path=wgt_path,
+            author_p12=author_p12,
+            author_pwd="password123",
+            distributor_p12=distributor_p12,
+            distributor_pwd="password123",
+            privilege="partner",
+        )
+        signed_wgt = sign_result["package_path"]
+        
+        # Install on TV
+        install_result = self.install_app(
+            wgt_path=signed_wgt,
+            target_serial=target_serial,
+        )
+        results["install"] = install_result
+        
+        # Final instructions
+        results["next_steps"] = [
+            "1. On TV: Go to Apps -> Settings (bottom) -> 12345 -> Developer Mode",
+            "2. Set Host PC IP to 127.0.0.1",
+            "3. Reboot TV",
+            "4. tizen-homebrew will now handle all future .wgt installs locally",
+        ]
+        
+        return results
+
     def sign_and_package_wgt(
         self,
         target_path: str,
