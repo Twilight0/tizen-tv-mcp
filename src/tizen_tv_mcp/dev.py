@@ -431,22 +431,41 @@ function navigateFocus(direction) {{
             self.sdb.run(["push", p, remote_path], target_serial=target_serial)
             cmd = f"shell:0 vd_appinstall {pkg_id} {remote_path}"
             out = self.sdb.exec_stream(cmd, target_serial=target_serial)
-            success = "was_install_app return WAS_TRUE" in out and "reason: Success" in out
 
-            return {
+            # vd_appinstall reports failure with a sentence that contains the word "Success":
+            #   app_id[x] install failed[118, 0], reason: Success :
+            # so "reason: Success" is part of the failure line, never a verdict on its own.
+            failure = re.search(
+                r"install\s+failed\[(\d+),\s*(-?\d+)\](?:,\s*reason:\s*([^:\n]*))?", out, re.IGNORECASE
+            )
+            success = bool(re.search(r"install\s+completed", out, re.IGNORECASE)) and not failure
+
+            result = {
                 "package_path": p,
                 "package_id": pkg_id,
                 "mode": "vd_appinstall (Web .wgt)",
                 "output": out,
                 "success": success,
             }
+            if failure:
+                result["error_code"] = int(failure.group(1))
+                result["error_detail"] = int(failure.group(2))
+                result["error_reason"] = (failure.group(3) or "").strip()
+                result["notes"] = (
+                    "The set refused the package after signature verification. A certificate "
+                    "problem shows up as a 'Check certificate error' line with detail -3/-4/-11/-12; "
+                    "a bare '[118, 0], reason: Success' carries no detail and is TV-side, not a "
+                    "signing or storage failure."
+                )
+            return result
         else:
             out = self.sdb.run(["install", p], target_serial=target_serial, timeout=60)
+            failed = bool(re.search(r"\bfail", out, re.IGNORECASE))
             return {
                 "package_path": p,
                 "mode": "appinstall (Native .tpk)",
                 "output": out,
-                "success": "100%" in out or "success" in out.lower(),
+                "success": not failed and bool(re.search(r"\b(100%|success)", out, re.IGNORECASE)),
             }
     def remote_key_press(
         self,
